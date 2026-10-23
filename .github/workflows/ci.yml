@@ -1,0 +1,83 @@
+name: Linux Coursework CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-cw-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coursework:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify infrastructure and prepare trusted tests
+        shell: bash
+        env:
+          TEMPLATE_REPOSITORY: unnc-aim/aim-2627-linux-coursework
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" = "$TEMPLATE_REPOSITORY" ]; then
+            BASE=$(git rev-parse HEAD)
+          else
+            BASE=$(git rev-list --max-parents=0 HEAD)
+            if [ "$(printf '%s\n' "$BASE" | wc -l)" -ne 1 ]; then
+              echo '::error::需要单一模板初始提交'
+              exit 1
+            fi
+            git show "$BASE:tools/check_integrity.py" > "$RUNNER_TEMP/aim-check-integrity.py"
+            python3 "$RUNNER_TEMP/aim-check-integrity.py"
+          fi
+          mkdir -p "$RUNNER_TEMP/aim-trusted" generated
+          git archive "$BASE" tools tests | tar -x -C "$RUNNER_TEMP/aim-trusted"
+          sudo chown -R root:root "$RUNNER_TEMP/aim-trusted"
+          sudo chmod -R go-w "$RUNNER_TEMP/aim-trusted"
+
+      - name: Prepare Linux tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openssh-client openssh-server tmux procps curl dpkg
+
+      - name: Check test infrastructure
+        run: python3 -m unittest discover -s "$RUNNER_TEMP/aim-trusted/tests" -p "test_*.py" -v
+
+      - name: Evaluate all public cases
+        id: tests
+        shell: bash
+        run: |
+          sudo python3 "$RUNNER_TEMP/aim-trusted/tools/run_tests.py" \
+            --submission "$GITHUB_WORKSPACE/src/main" \
+            --results "$GITHUB_WORKSPACE/generated"
+
+      - name: Publish assessment summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f generated/summary.md ]; then
+            cat generated/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' '## 未产生有效成绩' '' '基础设施检查或测试环境启动失败，请查看前序步骤。' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload score and feedback
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-coursework-${{ github.run_id }}-${{ github.run_attempt }}
+          path: generated/
+          if-no-files-found: ignore
+          retention-days: 14

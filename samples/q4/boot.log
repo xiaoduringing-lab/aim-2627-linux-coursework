@@ -1,0 +1,3 @@
+INFO 09:00:00 launcher startup complete
+WARN 09:00:01 camera frame delayed
+ERROR 09:00:02 camera device unavailable
