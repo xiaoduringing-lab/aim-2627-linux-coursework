@@ -5,6 +5,32 @@ set -eu
 input=${1:?需要输入目录}
 output=${2:?需要输出目录}
 
-# TODO：删除下方提示和 exit 77，再填写你的命令。
-printf '%s\n' 'Q5 尚未实现' >&2
-exit 77
+source "$input/launch.env"
+mkdir -p "$output"
+
+if bash "$LAUNCH_TOOL" "$MODEL_PATH" "$CAMERA_PATH" > "$output/stdout.log" 2> "$output/stderr.log"; then
+    code=0
+else
+    code=$?
+fi
+
+echo "$code" > "$output/exit-code.txt"
+case "$code" in
+    0)
+        result=SUCCESS
+        reason=NONE
+        ;;
+    10)
+        result=FAILED
+        reason=MODEL_MISSING
+        ;;
+    20)
+        result=FAILED
+        reason=CAMERA_DENIED
+        ;;
+    *)
+        exit "$code"
+        ;;
+esac
+
+printf 'result=%s\nexit_code=%s\nreason=%s\n' "$result" "$code" "$reason" > "$output/report.txt"
